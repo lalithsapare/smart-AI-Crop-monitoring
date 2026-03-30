@@ -1,7 +1,4 @@
 import os
-import io
-import cv2
-import json
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -21,31 +18,31 @@ st.set_page_config(
 st.markdown("""
 <style>
 .main {
-    background: linear-gradient(180deg, #f6fbf8 0%, #eef7f2 100%);
+    background: linear-gradient(180deg, #f5fbf7 0%, #eef8f1 100%);
 }
 .block-container {
-    padding-top: 1.5rem;
+    padding-top: 1.2rem;
     padding-bottom: 2rem;
 }
 h1, h2, h3 {
-    color: #124734;
+    color: #104735;
 }
-.stMetric {
+div[data-testid="stMetric"] {
     background: white;
-    padding: 12px;
-    border-radius: 14px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    border-radius: 16px;
+    padding: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.05);
 }
 .card {
     background: white;
     padding: 18px;
     border-radius: 16px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.06);
-    margin-bottom: 14px;
+    margin-bottom: 16px;
 }
 .small-note {
+    color: #647067;
     font-size: 0.9rem;
-    color: #5f6f66;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -77,20 +74,22 @@ irrigation_model = load_tf_model("models/irrigation_model.keras")
 
 def preprocess_image(uploaded_file, target_size=(224, 224)):
     image = Image.open(uploaded_file).convert("RGB")
-    img_array = np.array(image)
-    resized = cv2.resize(img_array, target_size)
-    normalized = resized.astype("float32") / 255.0
-    batched = np.expand_dims(normalized, axis=0)
-    return image, batched, normalized
+    display_image = image.copy()
+    resized = image.resize(target_size)
+    img_array = np.array(resized).astype("float32") / 255.0
+    batched = np.expand_dims(img_array, axis=0)
+    return display_image, batched, img_array
 
 def predict_image_model(model, image_tensor, class_names):
     if model is None:
         probs = np.random.dirichlet(np.ones(len(class_names)), size=1)[0]
     else:
         raw = model.predict(image_tensor, verbose=0)[0]
-        probs = tf.nn.softmax(raw).numpy() if len(raw.shape) == 0 else raw
-        probs = np.array(probs).flatten()
-        probs = probs / probs.sum()
+        probs = np.array(raw).flatten()
+        if probs.sum() <= 0:
+            probs = np.random.dirichlet(np.ones(len(class_names)), size=1)[0]
+        else:
+            probs = probs / probs.sum()
     idx = int(np.argmax(probs))
     return class_names[idx], float(probs[idx]), probs
 
@@ -119,7 +118,7 @@ def probability_df(classes, probs, model_name):
     })
 
 st.title("AI Crop Monitoring")
-st.caption("Integrated disease detection, pest analysis, NDVI trends, crop stress monitoring, and combined prediction dashboard.")
+st.caption("Disease detection, pest analysis, NDVI monitoring, crop stress analysis, irrigation advisory, and combined prediction dashboard.")
 
 with st.sidebar:
     st.header("Field Inputs")
@@ -138,18 +137,21 @@ if run_btn:
         temperature, humidity, soil_moisture, ndvi_value
     )
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("NDVI Score", f"{ndvi_value:.2f}")
-    col2.metric("Disease Risk", f"{disease_risk * 100:.1f}%")
-    col3.metric("Crop Stress", f"{stress_score * 100:.1f}%")
-    col4.metric("Yield Potential", f"{yield_score * 100:.1f}%")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("NDVI Score", f"{ndvi_value:.2f}")
+    c2.metric("Disease Risk", f"{disease_risk * 100:.1f}%")
+    c3.metric("Crop Stress", f"{stress_score * 100:.1f}%")
+    c4.metric("Yield Potential", f"{yield_score * 100:.1f}%")
 
     tomato_pred = ("No image", 0.0, np.zeros(len(TOMATO_CLASSES)))
     rice_pred = ("No image", 0.0, np.zeros(len(RICE_CLASSES)))
     pest_pred = ("No image", 0.0, np.zeros(len(PEST_CLASSES)))
 
+    leaf_display = None
+    pest_display = None
+
     if uploaded_leaf is not None:
-        leaf_img, leaf_tensor, _ = preprocess_image(uploaded_leaf)
+        leaf_display, leaf_tensor, _ = preprocess_image(uploaded_leaf)
         if crop_name == "Tomato":
             tomato_pred = predict_image_model(tomato_model, leaf_tensor, TOMATO_CLASSES)
         elif crop_name == "Rice":
@@ -158,7 +160,7 @@ if run_btn:
             tomato_pred = predict_image_model(tomato_model, leaf_tensor, TOMATO_CLASSES)
 
     if uploaded_pest is not None:
-        pest_img, pest_tensor, _ = preprocess_image(uploaded_pest)
+        pest_display, pest_tensor, _ = preprocess_image(uploaded_pest)
         pest_pred = predict_image_model(pest_model, pest_tensor, PEST_CLASSES)
 
     crop_health_label = "Healthy"
@@ -189,23 +191,23 @@ if run_btn:
     st.dataframe(results_df, use_container_width=True)
 
     st.markdown("## Uploaded Images")
-    img_col1, img_col2 = st.columns(2)
-    with img_col1:
-        if uploaded_leaf is not None:
-            st.image(uploaded_leaf, caption="Disease / Leaf Image", use_column_width=True)
+    i1, i2 = st.columns(2)
+    with i1:
+        if leaf_display is not None:
+            st.image(leaf_display, caption="Disease / Leaf Image", use_column_width=True)
         else:
             st.info("Leaf image not uploaded.")
-    with img_col2:
-        if uploaded_pest is not None:
-            st.image(uploaded_pest, caption="Pest Image", use_column_width=True)
+    with i2:
+        if pest_display is not None:
+            st.image(pest_display, caption="Pest Image", use_column_width=True)
         else:
             st.info("Pest image not uploaded.")
 
     st.markdown("## Visual Analytics")
 
-    chart_col1, chart_col2 = st.columns(2)
+    v1, v2 = st.columns(2)
 
-    with chart_col1:
+    with v1:
         fig_bar = px.bar(
             results_df,
             x="Model",
@@ -214,10 +216,10 @@ if run_btn:
             color_continuous_scale="greens",
             title="Model Confidence Scores"
         )
-        fig_bar.update_layout(xaxis_tickangle=-30, height=450)
+        fig_bar.update_layout(height=450, xaxis_tickangle=-30)
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    with chart_col2:
+    with v2:
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
             value=stress_score * 100,
@@ -228,8 +230,8 @@ if run_btn:
                 "steps": [
                     {"range": [0, 35], "color": "#bbf7d0"},
                     {"range": [35, 70], "color": "#fde68a"},
-                    {"range": [70, 100], "color": "#fecaca"},
-                ],
+                    {"range": [70, 100], "color": "#fecaca"}
+                ]
             }
         ))
         fig_gauge.update_layout(height=450)
@@ -238,25 +240,19 @@ if run_btn:
     ndvi_df = generate_ndvi_curve(ndvi_value)
     stress_df = generate_stress_curve(stress_score)
 
-    trend_col1, trend_col2 = st.columns(2)
+    t1, t2 = st.columns(2)
 
-    with trend_col1:
-        fig_ndvi = px.line(
-            ndvi_df, x="Date", y="NDVI", markers=True,
-            title="NDVI Trend Analysis"
-        )
+    with t1:
+        fig_ndvi = px.line(ndvi_df, x="Date", y="NDVI", markers=True, title="NDVI Trend Analysis")
         fig_ndvi.update_traces(line_color="#15803d")
         st.plotly_chart(fig_ndvi, use_container_width=True)
 
-    with trend_col2:
-        fig_stress = px.line(
-            stress_df, x="Date", y="Stress", markers=True,
-            title="Crop Stress Trend"
-        )
+    with t2:
+        fig_stress = px.line(stress_df, x="Date", y="Stress", markers=True, title="Crop Stress Trend")
         fig_stress.update_traces(line_color="#dc2626")
         st.plotly_chart(fig_stress, use_container_width=True)
 
-    st.markdown("## Disease / Pest Probability Analysis")
+    st.markdown("## Disease and Pest Probability Analysis")
 
     prob_frames = []
     if uploaded_leaf is not None:
@@ -280,28 +276,28 @@ if run_btn:
         )
         st.plotly_chart(fig_prob, use_container_width=True)
     else:
-        st.warning("Upload image files to see disease and pest probability graphs.")
+        st.warning("Upload image files to view disease and pest probability charts.")
 
-    st.markdown("## Field Interpretation")
+    st.markdown("## Field Recommendation")
 
-    recs = []
+    recommendations = []
     if disease_risk > 0.65:
-        recs.append("High disease risk detected; inspect field immediately and isolate infected plants.")
+        recommendations.append("High disease risk detected; inspect infected plants immediately.")
     if stress_score > 0.60:
-        recs.append("Crop stress is elevated; review water, temperature, and nutrient conditions.")
+        recommendations.append("Crop stress is elevated; check water, heat, and nutrient balance.")
     if irrigation_need > 0.60:
-        recs.append("Irrigation requirement is high; schedule watering cycle soon.")
+        recommendations.append("Irrigation need is high; plan watering soon.")
     if ndvi_value < 0.45:
-        recs.append("NDVI is low; vegetation vigor may be reduced and field scouting is recommended.")
+        recommendations.append("NDVI is low; crop vigor may be reduced and scouting is advised.")
     if yield_score > 0.70:
-        recs.append("Yield outlook is favorable under current conditions.")
-    if not recs:
-        recs.append("Field condition appears stable with no strong warning signal at this time.")
+        recommendations.append("Yield outlook is favorable under current field conditions.")
+    if not recommendations:
+        recommendations.append("Field condition appears stable with no major warning at this time.")
 
-    for rec in recs:
+    for rec in recommendations:
         st.markdown(f"- {rec}")
 
-    st.markdown("## Export Prediction Report")
+    st.markdown("## Download Report")
     csv_data = results_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download Combined Prediction CSV",
@@ -311,7 +307,7 @@ if run_btn:
     )
 
 else:
-    st.info("Set field inputs in the sidebar, upload images, and click 'Run Full Prediction'.")
+    st.info("Choose field inputs, upload images, and click 'Run Full Prediction' to start.")
 
 st.markdown("---")
 st.caption("AI Crop Monitoring dashboard for disease, pest, NDVI, crop stress, irrigation, and yield prediction.")
